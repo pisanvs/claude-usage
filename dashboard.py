@@ -821,6 +821,13 @@ window.addEventListener('popstate', () => {
   applyFilter();
 });
 
+document.addEventListener('click', e => {
+  const a = e.target.closest('a.proj-link');
+  if (!a) return;
+  e.preventDefault();
+  setSelectedProject(a.dataset.project);
+});
+
 // ── Session sort ───────────────────────────────────────────────────────────
 function setSessionSort(col) {
   if (sessionSortCol === col) {
@@ -1287,7 +1294,7 @@ function renderSessionsTable(sessions) {
       : `<td class="cost-na">n/a</td>`;
     return `<tr>
       <td class="muted" style="font-family:monospace">${esc(s.session_id)}&hellip;</td>
-      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(s.project)});return false;">${esc(s.project)}</a></td>
+      <td><a class="proj-link" href="#" data-project="${esc(s.project)}">${esc(s.project)}</a></td>
       <td class="muted">${esc(s.last)}</td>
       <td class="muted">${esc(s.duration_min)}m</td>
       <td><span class="model-tag">${esc(s.model)}</span></td>
@@ -1387,7 +1394,7 @@ function renderProjectCostTable(byProject) {
   const shown = sorted.slice(0, projectLimit);
   document.getElementById('project-cost-body').innerHTML = shown.map(p => {
     return `<tr>
-      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(p.project)});return false;">${esc(p.project)}</a></td>
+      <td><a class="proj-link" href="#" data-project="${esc(p.project)}">${esc(p.project)}</a></td>
       <td class="num">${p.sessions}</td>
       <td class="num">${fmt(p.turns)}</td>
       <td class="num">${fmt(p.input)}</td>
@@ -1464,7 +1471,7 @@ function renderProjectBranchCostTable(rows) {
   const shown = sorted.slice(0, branchLimit);
   document.getElementById('project-branch-cost-body').innerHTML = shown.map(pb => {
     return `<tr>
-      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(pb.project)});return false;">${esc(pb.project)}</a></td>
+      <td><a class="proj-link" href="#" data-project="${esc(pb.project)}">${esc(pb.project)}</a></td>
       <td class="muted" style="font-family:monospace">${esc(pb.branch || '\u2014')}</td>
       <td class="num">${pb.sessions}</td>
       <td class="num">${fmt(pb.turns)}</td>
