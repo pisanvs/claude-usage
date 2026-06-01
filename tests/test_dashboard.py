@@ -403,6 +403,32 @@ class TestHTMLTemplate(unittest.TestCase):
         # Bounds case: today returns start === end === today's ISO date
         self.assertIn("range === 'today'", HTML_TEMPLATE)
 
+    def test_project_banner_present(self):
+        self.assertIn('id="project-banner"', HTML_TEMPLATE)
+        self.assertIn('id="project-banner-name"', HTML_TEMPLATE)
+        self.assertIn('setSelectedProject(null)', HTML_TEMPLATE)
+
+    def test_project_mode_css_present(self):
+        self.assertIn('body.project-mode #project-banner', HTML_TEMPLATE)
+        self.assertIn('section--all-projects-only', HTML_TEMPLATE)
+        self.assertIn('section--project-only', HTML_TEMPLATE)
+
+    def test_branch_cost_table_present(self):
+        self.assertIn('id="branch-cost-body"', HTML_TEMPLATE)
+        self.assertIn('id="branch-cost-foot"', HTML_TEMPLATE)
+
+    def test_set_selected_project_function_present(self):
+        self.assertIn('function setSelectedProject(', HTML_TEMPLATE)
+        self.assertIn('function readURLProject(', HTML_TEMPLATE)
+
+    def test_daily_key_renamed(self):
+        self.assertIn('daily_by_model_project', HTML_TEMPLATE)
+        self.assertNotIn('rawData.daily_by_model.', HTML_TEMPLATE)
+
+    def test_hourly_key_renamed(self):
+        self.assertIn('hourly_by_model_project', HTML_TEMPLATE)
+        self.assertNotIn('rawData.hourly_by_model.', HTML_TEMPLATE)
+
 
 class TestPricingParity(unittest.TestCase):
     """Verify CLI and dashboard pricing tables stay in sync."""
