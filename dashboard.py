@@ -123,6 +123,35 @@ def get_dashboard_data(db_path=DB_PATH):
             "cache_creation": r["total_cache_creation"] or 0,
         })
 
+    # ── Recent turns (last ~57 days, UTC) for the activity timeline ───────────
+    # Wide-enough window so the client can navigate ~8 weeks of 7-day windows
+    # via the prev/next arrows on the activity card. One-day buffer past 56 so
+    # the client can carve out full local days after TZ shift on either edge.
+    # Returns one row per turn; the client groups, colors, and computes active
+    # hours (gaps < 10 min between consecutive turns count as active time).
+    recent_turn_rows = conn.execute("""
+        SELECT
+            t.timestamp                                      as ts,
+            COALESCE(NULLIF(t.model, ''), 'unknown')         as model,
+            COALESCE(s.project_name, 'unknown')              as project,
+            t.input_tokens                                   as input,
+            t.output_tokens                                  as output
+        FROM turns t
+        LEFT JOIN sessions s ON t.session_id = s.session_id
+        WHERE t.timestamp IS NOT NULL
+          AND length(t.timestamp) >= 16
+          AND substr(t.timestamp, 1, 10) >= date('now', '-57 days')
+        ORDER BY t.timestamp
+    """).fetchall()
+
+    recent_turns = [{
+        "ts":      r["ts"],
+        "model":   r["model"],
+        "project": r["project"],
+        "input":   r["input"] or 0,
+        "output":  r["output"] or 0,
+    } for r in recent_turn_rows]
+
     conn.close()
 
     return {
@@ -130,6 +159,7 @@ def get_dashboard_data(db_path=DB_PATH):
         "daily_by_model_project":  daily_by_model_project,
         "hourly_by_model_project": hourly_by_model_project,
         "sessions_all":            sessions_all,
+        "recent_turns":            recent_turns,
         "generated_at":            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -267,6 +297,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } .chart-card.wide { grid-column: 1; } }
 
+  /* ── Activity timeline ──────────────────────────────────────────────────── */
+  .activity-layout { display: grid; grid-template-columns: 4fr 1fr; gap: 20px; align-items: stretch; }
+  .activity-main { position: relative; height: 360px; min-width: 0; }
+  #activity-canvas { display: block; width: 100%; height: 100%; }
+  .activity-side { display: flex; flex-direction: column; gap: 12px; }
+  .activity-side-stat { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .activity-side-stat.activity-side-total { background: linear-gradient(135deg, rgba(217,119,87,0.10), rgba(72,160,199,0.06)); border-color: rgba(217,119,87,0.35); }
+  .activity-side-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .activity-side-value { font-size: 28px; font-weight: 700; color: var(--text); font-feature-settings: "tnum"; line-height: 1.1; }
+  .activity-side-value-sm { font-size: 18px; font-weight: 600; color: var(--text); font-feature-settings: "tnum"; line-height: 1.1; }
+  .activity-side-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .activity-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .activity-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .activity-swatch-input  { background: var(--blue); }
+  .activity-swatch-output { background: var(--accent); }
+  .activity-nav { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
+  .activity-nav-btn { background: var(--card); border: 1px solid var(--border); color: var(--muted); width: 24px; height: 24px; border-radius: 5px; cursor: pointer; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: color 0.15s, border-color 0.15s, background 0.15s; }
+  .activity-nav-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: var(--raised); }
+  .activity-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .activity-range { font-size: 11px; color: var(--text); min-width: 130px; text-align: center; font-feature-settings: "tnum"; }
+  @media (max-width: 900px) {
+    .activity-layout { grid-template-columns: 1fr; }
+    .activity-side { flex-direction: row; flex-wrap: wrap; }
+    .activity-side-stat { flex: 1 1 140px; }
+  }
+
   /* ── Project drill-down mode ────────────────────────────────────────────── */
   #project-banner { display: none; background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 24px; align-items: center; gap: 12px; }
   body.project-mode #project-banner { display: flex; }
@@ -344,6 +400,45 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="chart-card section--all-projects-only">
       <h2>Top Projects by Tokens</h2>
       <div class="chart-wrap"><canvas id="chart-project"></canvas></div>
+    </div>
+  </div>
+  <div class="chart-card wide" id="activity-card">
+    <div class="chart-header">
+      <h2 id="activity-title">Activity</h2>
+      <div class="chart-header-right">
+        <span class="activity-legend"><span class="activity-swatch activity-swatch-input"></span>Input</span>
+        <span class="activity-legend"><span class="activity-swatch activity-swatch-output"></span>Output</span>
+        <div class="activity-nav">
+          <button class="activity-nav-btn" id="activity-prev" onclick="shiftActivityWeek(-1)" title="Previous week" aria-label="Previous week">&#x2039;</button>
+          <span class="activity-range" id="activity-range">&mdash;</span>
+          <button class="activity-nav-btn" id="activity-next" onclick="shiftActivityWeek(1)" title="Next week" aria-label="Next week">&#x203A;</button>
+        </div>
+      </div>
+    </div>
+    <div class="activity-layout">
+      <div class="activity-main">
+        <canvas id="activity-canvas"></canvas>
+      </div>
+      <aside class="activity-side">
+        <div class="activity-side-stat activity-side-total">
+          <div class="activity-side-label">Total Active</div>
+          <div class="activity-side-value" id="activity-total-hours">&mdash;</div>
+          <div class="activity-side-sub">across 7 days</div>
+        </div>
+        <div class="activity-side-stat">
+          <div class="activity-side-label">Daily Average</div>
+          <div class="activity-side-value-sm" id="activity-avg-hours">&mdash;</div>
+        </div>
+        <div class="activity-side-stat">
+          <div class="activity-side-label">Peak Day</div>
+          <div class="activity-side-value-sm" id="activity-peak-day">&mdash;</div>
+          <div class="activity-side-sub" id="activity-peak-hours"></div>
+        </div>
+        <div class="activity-side-stat">
+          <div class="activity-side-label">Turns</div>
+          <div class="activity-side-value-sm" id="activity-turn-count">&mdash;</div>
+        </div>
+      </aside>
     </div>
   </div>
   <div class="table-card">
@@ -991,6 +1086,7 @@ function applyFilter() {
   renderHourlyChart(hourlyAgg);
   renderModelChart(byModel);
   renderProjectChart(byProject);
+  renderActivityTimeline(rawData.recent_turns || []);
   lastFilteredSessions = sortSessions(filteredSessions);
   lastByModel = byModel;
   lastByProject = sortProjects(byProject);
@@ -1222,6 +1318,273 @@ function renderProjectChart(byProject) {
       }
     }
   });
+}
+
+// ── Activity timeline ──────────────────────────────────────────────────────
+// Renders the 7-day activity card: one vertical column per local day, y-axis
+// is time-of-day (00:00 at top → 24:00 at bottom). Each turn is drawn as a
+// thin horizontal band at its local time-of-day, split left/right into input
+// and output halves. The fills use low alpha so overlapping turns accumulate
+// visually but stay readable — clamped via globalAlpha-style normalization.
+//
+// Active hours per day are computed by walking sorted turn timestamps and
+// summing gaps under ACTIVITY_IDLE_GAP_MIN minutes between consecutive turns.
+// Standalone turns also contribute a small floor (ACTIVITY_TURN_FLOOR_SEC).
+const ACTIVITY_IDLE_GAP_MIN  = 10;   // gaps shorter than this count as active
+const ACTIVITY_TURN_FLOOR_SEC = 20;  // every turn at least counts this much
+const ACTIVITY_DAYS = 7;
+let lastActivityTurns = [];
+let activityResizeBound = false;
+// Week offset: 0 = window ending today, -1 = previous 7-day window, etc.
+// Positive values are clamped away by the renderer (can't see the future).
+let activityWeekOffset = 0;
+
+function shiftActivityWeek(delta) {
+  const next = activityWeekOffset + delta;
+  if (next > 0) return;          // never scroll into the future
+  activityWeekOffset = next;
+  renderActivityTimeline(lastActivityTurns);
+}
+
+function computeActiveSeconds(timestampsMs) {
+  if (!timestampsMs.length) return 0;
+  const sorted = timestampsMs.slice().sort((a, b) => a - b);
+  const idleMs = ACTIVITY_IDLE_GAP_MIN * 60 * 1000;
+  let secs = ACTIVITY_TURN_FLOOR_SEC; // first turn floor
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap <= idleMs) secs += gap / 1000;
+    else               secs += ACTIVITY_TURN_FLOOR_SEC;
+  }
+  return secs;
+}
+
+function formatHours(secs) {
+  if (secs <= 0) return '0h';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h === 0) return m + 'm';
+  if (m === 0) return h + 'h';
+  return h + 'h ' + m + 'm';
+}
+
+function localDayKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function renderActivityTimeline(recentTurns) {
+  const canvas = document.getElementById('activity-canvas');
+  if (!canvas) return;
+  lastActivityTurns = recentTurns;
+  if (!activityResizeBound) {
+    activityResizeBound = true;
+    let rTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(rTimer);
+      rTimer = setTimeout(() => renderActivityTimeline(lastActivityTurns), 150);
+    });
+  }
+
+  // Build the 7-day window (oldest → newest left-to-right). At offset 0 the
+  // window ends today; each step of activityWeekOffset shifts by 7 local days.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = []; // [{key, label, dow, turns: []}]
+  for (let i = ACTIVITY_DAYS - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i + activityWeekOffset * ACTIVITY_DAYS);
+    days.push({
+      key: localDayKey(d),
+      label: String(d.getDate()),
+      dow: d.toLocaleDateString(undefined, { weekday: 'short' }),
+      date: new Date(d),
+      turns: [],
+    });
+  }
+  const dayIndex = new Map(days.map((d, i) => [d.key, i]));
+  const windowStartMs = days[0].date.getTime();
+
+  // Filter turns by selected model (and project, when drilled in) + place into
+  // local-day buckets.
+  for (const t of recentTurns) {
+    if (!selectedModels.has(t.model)) continue;
+    if (selectedProject && t.project !== selectedProject) continue;
+    const ts = new Date(t.ts);
+    if (isNaN(ts)) continue;
+    const idx = dayIndex.get(localDayKey(ts));
+    if (idx === undefined) continue;
+    days[idx].turns.push({
+      ms: ts.getTime(),
+      // minutes-of-day in local time
+      minute: ts.getHours() * 60 + ts.getMinutes() + ts.getSeconds() / 60,
+      input: t.input,
+      output: t.output,
+    });
+  }
+
+  // Per-day stats
+  let totalSecs = 0;
+  let totalTurns = 0;
+  let peakIdx = 0;
+  let peakSecs = 0;
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    d.secs = computeActiveSeconds(d.turns.map(t => t.ms));
+    totalSecs += d.secs;
+    totalTurns += d.turns.length;
+    if (d.secs > peakSecs) { peakSecs = d.secs; peakIdx = i; }
+  }
+
+  // ── Header: range label + nav button state ───────────────────────────────
+  const fmtMd = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  document.getElementById('activity-range').textContent =
+    fmtMd(days[0].date) + ' – ' + fmtMd(days[days.length - 1].date);
+  document.getElementById('activity-title').textContent =
+    activityWeekOffset === 0 ? 'Activity — Last 7 Days'
+    : activityWeekOffset === -1 ? 'Activity — Previous Week'
+    : 'Activity — ' + Math.abs(activityWeekOffset) + ' Weeks Ago';
+  // Next: disabled at offset 0 (can't see future). Prev: disabled when there's
+  // no turn earlier than the current window's start in the loaded dataset (and
+  // also respects the current model/project filter).
+  const nextBtn = document.getElementById('activity-next');
+  const prevBtn = document.getElementById('activity-prev');
+  if (nextBtn) nextBtn.disabled = activityWeekOffset >= 0;
+  if (prevBtn) {
+    const hasOlder = recentTurns.some(t => {
+      if (!selectedModels.has(t.model)) return false;
+      if (selectedProject && t.project !== selectedProject) return false;
+      const ms = Date.parse(t.ts);
+      return !isNaN(ms) && ms < windowStartMs;
+    });
+    prevBtn.disabled = !hasOlder;
+  }
+
+  // ── Sidebar text ─────────────────────────────────────────────────────────
+  document.getElementById('activity-total-hours').textContent = formatHours(totalSecs);
+  document.getElementById('activity-avg-hours').textContent   = formatHours(totalSecs / ACTIVITY_DAYS);
+  document.getElementById('activity-turn-count').textContent  = totalTurns.toLocaleString();
+  if (peakSecs > 0) {
+    const peakDay = days[peakIdx];
+    document.getElementById('activity-peak-day').textContent   = peakDay.dow + ' ' + peakDay.label;
+    document.getElementById('activity-peak-hours').textContent = formatHours(peakSecs);
+  } else {
+    document.getElementById('activity-peak-day').textContent   = '—';
+    document.getElementById('activity-peak-hours').textContent = '';
+  }
+
+  // ── Canvas draw ─────────────────────────────────────────────────────────
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = Math.max(1, Math.floor(rect.width));
+  const H = Math.max(1, Math.floor(rect.height));
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  // Layout: top header (~22px) for day labels, bottom footer (~36px) for
+  // per-day totals, left gutter (~36px) for hour labels.
+  const padTop = 24, padBottom = 40, padLeft = 38, padRight = 8;
+  const plotX = padLeft;
+  const plotY = padTop;
+  const plotW = Math.max(40, W - padLeft - padRight);
+  const plotH = Math.max(40, H - padTop - padBottom);
+  const colW  = plotW / ACTIVITY_DAYS;
+
+  // Background gridlines: every 6 hours
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1;
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  ctx.fillStyle = C.axis;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let h = 0; h <= 24; h += 6) {
+    const y = plotY + (h / 24) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(plotX, y);
+    ctx.lineTo(plotX + plotW, y);
+    ctx.stroke();
+    const label = h === 24 ? '24:00' : String(h).padStart(2, '0') + ':00';
+    ctx.fillText(label, plotX - 6, y);
+  }
+
+  // Day header labels (top) and column separators
+  ctx.textAlign = 'center';
+  for (let i = 0; i < days.length; i++) {
+    const cx = plotX + (i + 0.5) * colW;
+    const isToday = (activityWeekOffset === 0) && (i === days.length - 1);
+    ctx.fillStyle = isToday ? '#d97757' : C.axis;
+    ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(days[i].dow + ' ' + days[i].label, cx, padTop - 10);
+    // subtle column background tint for today
+    if (isToday) {
+      ctx.fillStyle = 'rgba(217,119,87,0.04)';
+      ctx.fillRect(plotX + i * colW, plotY, colW, plotH);
+    }
+  }
+
+  // Draw turns: each turn = a thin horizontal band at its time-of-day.
+  // Left half input-colored, right half output-colored, alpha proportional
+  // to token share so quiet turns are faint and heavy turns are bold.
+  // Multiple turns at the same minute accumulate via source-over additive blend.
+  const bandH = 2; // px tall per band
+  const innerPad = 2; // padding inside column
+  ctx.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    const colX = plotX + i * colW + innerPad;
+    const innerW = colW - innerPad * 2;
+    const halfW = innerW / 2;
+    for (const t of d.turns) {
+      const y = plotY + (t.minute / (24 * 60)) * plotH - bandH / 2;
+      const total = t.input + t.output;
+      // Alpha scales with token magnitude (log-ish), clamped, so a single big
+      // turn isn't fully opaque but a stack of small turns can build to solid.
+      // Floor of 0.18 ensures even tiny turns are visible; cap 0.55 so single
+      // mega-turns don't blow out the column.
+      const mag   = Math.log10(Math.max(1, total)) / 5; // 0..~1.2 for 100k tokens
+      const alpha = Math.min(0.55, Math.max(0.18, 0.22 + mag * 0.25));
+      // Input portion (left)
+      if (t.input > 0) {
+        ctx.fillStyle = 'rgba(72,160,199,' + alpha.toFixed(3) + ')';
+        ctx.fillRect(colX, y, halfW - 0.5, bandH);
+      }
+      // Output portion (right)
+      if (t.output > 0) {
+        ctx.fillStyle = 'rgba(217,119,87,' + alpha.toFixed(3) + ')';
+        ctx.fillRect(colX + halfW + 0.5, y, halfW - 0.5, bandH);
+      }
+    }
+  }
+
+  // Column dividers
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < days.length; i++) {
+    const x = plotX + i * colW;
+    ctx.beginPath();
+    ctx.moveTo(x, plotY);
+    ctx.lineTo(x, plotY + plotH);
+    ctx.stroke();
+  }
+  // Outer plot border
+  ctx.strokeRect(plotX, plotY, plotW, plotH);
+
+  // Per-day totals (footer)
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let i = 0; i < days.length; i++) {
+    const cx = plotX + (i + 0.5) * colW;
+    const text = formatHours(days[i].secs);
+    ctx.fillStyle = days[i].secs > 0 ? '#BFBFBF' : C.axis;
+    ctx.font = '600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillText(text, cx, plotY + plotH + 10);
+  }
 }
 
 // Fills a table card's footer with the row-reveal control. Three states:
