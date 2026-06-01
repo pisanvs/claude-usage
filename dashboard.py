@@ -266,6 +266,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .footer-content a:hover { text-decoration: underline; }
 
   @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } .chart-card.wide { grid-column: 1; } }
+
+  /* ── Project drill-down mode ────────────────────────────────────────────── */
+  #project-banner { display: none; background: var(--card); border-bottom: 1px solid var(--border); padding: 10px 24px; align-items: center; gap: 12px; }
+  body.project-mode #project-banner { display: flex; }
+  .project-banner-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); white-space: nowrap; }
+  .project-banner-name { font-size: 14px; color: var(--text); font-weight: 600; }
+  .project-banner-clear { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; margin-left: auto; }
+  .project-banner-clear:hover { color: var(--text); border-color: var(--accent); }
+  body.project-mode .section--all-projects-only { display: none !important; }
+  .section--project-only { display: none; }
+  body.project-mode .section--project-only { display: block; }
+  a.proj-link { color: inherit; text-decoration: none; cursor: pointer; }
+  a.proj-link:hover { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -297,6 +310,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<div id="project-banner">
+  <span class="project-banner-label">Viewing project:</span>
+  <span class="project-banner-name" id="project-banner-name"></span>
+  <button class="project-banner-clear" onclick="setSelectedProject(null)">&#x00D7; All projects</button>
+</div>
+
 <div class="container">
   <div class="stats-row" id="stats-row"></div>
   <div class="charts-grid">
@@ -322,7 +341,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <h2>By Model</h2>
       <div class="chart-wrap"><canvas id="chart-model"></canvas></div>
     </div>
-    <div class="chart-card">
+    <div class="chart-card section--all-projects-only">
       <h2>Top Projects by Tokens</h2>
       <div class="chart-wrap"><canvas id="chart-project"></canvas></div>
     </div>
@@ -361,7 +380,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </table>
     <div class="table-foot" id="sessions-foot"></div>
   </div>
-  <div class="table-card">
+  <div class="table-card section--all-projects-only">
     <div class="section-header"><div class="section-title">Cost by Project</div><button class="export-btn" onclick="exportProjectsCSV()" title="Export all projects to CSV">&#x2913; CSV</button></div>
     <table>
       <thead><tr>
@@ -376,7 +395,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     </table>
     <div class="table-foot" id="project-cost-foot"></div>
   </div>
-  <div class="table-card">
+  <div class="table-card section--all-projects-only">
     <div class="section-header"><div class="section-title">Cost by Project &amp; Branch</div><button class="export-btn" onclick="exportProjectBranchCSV()" title="Export project+branch breakdown to CSV">&#x2913; CSV</button></div>
     <table>
       <thead><tr>
@@ -391,6 +410,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <tbody id="project-branch-cost-body"></tbody>
     </table>
     <div class="table-foot" id="project-branch-cost-foot"></div>
+  </div>
+  <div class="table-card section--project-only">
+    <div class="section-header"><div class="section-title">Cost by Branch</div><button class="export-btn" onclick="exportBranchCSV()" title="Export branches to CSV">&#x2913; CSV</button></div>
+    <table>
+      <thead><tr>
+        <th>Branch</th>
+        <th class="sortable" onclick="setBranchSort('sessions')">Sessions <span class="sort-icon" id="bsort-sessions"></span></th>
+        <th class="sortable" onclick="setBranchSort('turns')">Turns <span class="sort-icon" id="bsort-turns"></span></th>
+        <th class="sortable" onclick="setBranchSort('input')">Input <span class="sort-icon" id="bsort-input"></span></th>
+        <th class="sortable" onclick="setBranchSort('output')">Output <span class="sort-icon" id="bsort-output"></span></th>
+        <th class="sortable" onclick="setBranchSort('cost')">Est. Cost <span class="sort-icon" id="bsort-cost"></span></th>
+      </tr></thead>
+      <tbody id="branch-cost-body"></tbody>
+    </table>
+    <div class="table-foot" id="branch-cost-foot"></div>
   </div>
 </div>
 
