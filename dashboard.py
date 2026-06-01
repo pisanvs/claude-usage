@@ -866,7 +866,9 @@ function applyFilter() {
 
   // Filter daily rows by model + date range
   const filteredDaily = rawData.daily_by_model_project.filter(r =>
-    selectedModels.has(r.model) && (!start || r.day >= start) && (!end || r.day <= end)
+    selectedModels.has(r.model) &&
+    (!start || r.day >= start) && (!end || r.day <= end) &&
+    (!selectedProject || r.project === selectedProject)
   );
 
   // Daily chart: aggregate by day
@@ -895,7 +897,9 @@ function applyFilter() {
 
   // Filter sessions by model + date range
   const filteredSessions = rawData.sessions_all.filter(s =>
-    selectedModels.has(s.model) && (!start || s.last_date >= start) && (!end || s.last_date <= end)
+    selectedModels.has(s.model) &&
+    (!start || s.last_date >= start) && (!end || s.last_date <= end) &&
+    (!selectedProject || s.project === selectedProject)
   );
 
   // Add session counts into modelMap
@@ -936,6 +940,22 @@ function applyFilter() {
   }
   const byProjectBranch = Object.values(projBranchMap).sort((a, b) => b.cost - a.cost);
 
+  // By branch only (project mode): aggregate from filtered sessions, branch as key
+  const branchMap = {};
+  for (const s of filteredSessions) {
+    const branch = s.branch || '';
+    if (!branchMap[branch]) branchMap[branch] = { branch, input: 0, output: 0, cache_read: 0, cache_creation: 0, turns: 0, sessions: 0, cost: 0 };
+    const b = branchMap[branch];
+    b.input          += s.input;
+    b.output         += s.output;
+    b.cache_read     += s.cache_read;
+    b.cache_creation += s.cache_creation;
+    b.turns          += s.turns;
+    b.sessions++;
+    b.cost += calcCost(s.model, s.input, s.output, s.cache_read, s.cache_creation);
+  }
+  lastByBranch = typeof sortBranch === 'function' ? sortBranch(Object.values(branchMap)) : Object.values(branchMap);
+
   // Totals
   const totals = {
     sessions:       filteredSessions.length,
@@ -949,7 +969,9 @@ function applyFilter() {
 
   // Hourly aggregation (filtered by model + range, then bucketed by UTC hour)
   const hourlySrc = (rawData.hourly_by_model_project || []).filter(r =>
-    selectedModels.has(r.model) && (!start || r.day >= start) && (!end || r.day <= end)
+    selectedModels.has(r.model) &&
+    (!start || r.day >= start) && (!end || r.day <= end) &&
+    (!selectedProject || r.project === selectedProject)
   );
   const hourlyAgg = aggregateHourly(hourlySrc, hourlyTZ);
 
@@ -970,6 +992,7 @@ function applyFilter() {
   renderModelCostTable(lastByModel);
   renderProjectCostTable(lastByProject);
   renderProjectBranchCostTable(lastByProjectBranch);
+  if (typeof renderBranchCostTable === 'function') renderBranchCostTable(lastByBranch);
 }
 
 // ── Renderers ──────────────────────────────────────────────────────────────
