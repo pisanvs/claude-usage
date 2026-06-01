@@ -954,7 +954,7 @@ function applyFilter() {
     b.sessions++;
     b.cost += calcCost(s.model, s.input, s.output, s.cache_read, s.cache_creation);
   }
-  lastByBranch = typeof sortBranch === 'function' ? sortBranch(Object.values(branchMap)) : Object.values(branchMap);
+  lastByBranch = sortBranch(Object.values(branchMap));
 
   // Totals
   const totals = {
@@ -992,7 +992,7 @@ function applyFilter() {
   renderModelCostTable(lastByModel);
   renderProjectCostTable(lastByProject);
   renderProjectBranchCostTable(lastByProjectBranch);
-  if (typeof renderBranchCostTable === 'function') renderBranchCostTable(lastByBranch);
+  renderBranchCostTable(lastByBranch);
 }
 
 // ── Renderers ──────────────────────────────────────────────────────────────
@@ -1407,6 +1407,7 @@ function setProjectBranchSort(col) {
     branchSortDir = 'desc';
   }
   updateProjectBranchSortIcons();
+  updateBranchSortIcons();
   applyFilter();
 }
 
