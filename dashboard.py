@@ -453,6 +453,8 @@ function esc(s) {
 let rawData = null;
 let selectedModels = new Set();
 let selectedRange = '30d';
+let selectedProject = null;
+let lastByBranch = [];
 let charts = {};
 let sessionSortCol = 'last';
 let modelSortCol = 'cost';
@@ -485,6 +487,7 @@ let modelLimit = TABLE_STEPS[0];
 let sessionsLimit = TABLE_STEPS[0];
 let projectLimit = TABLE_STEPS[0];
 let branchLimit = TABLE_STEPS[0];
+let branchOnlyLimit = TABLE_STEPS[0];
 let hourlyTZ = 'local';  // 'local' or 'utc'
 
 // ── Peak-hour config ───────────────────────────────────────────────────────
@@ -789,8 +792,34 @@ function updateURL() {
   if (selectedRange !== '30d') params.set('range', selectedRange);
   if (!isDefaultModelSelection(allModels)) params.set('models', Array.from(selectedModels).join(','));
   const search = params.toString() ? '?' + params.toString() : '';
-  history.replaceState(null, '', window.location.pathname + search);
+  const hash = selectedProject ? '#project=' + encodeURIComponent(selectedProject) : '';
+  history.replaceState(null, '', window.location.pathname + search + hash);
 }
+
+function readURLProject() {
+  const m = decodeURIComponent(location.hash).match(/^#project=(.+)$/);
+  return m ? m[1] : null;
+}
+
+function applyProjectMode() {
+  document.body.classList.toggle('project-mode', selectedProject !== null);
+  const el = document.getElementById('project-banner-name');
+  if (el) el.textContent = selectedProject || '';
+}
+
+function setSelectedProject(name) {
+  selectedProject = name;
+  const base = window.location.pathname + window.location.search;
+  history.pushState(null, '', name ? base + '#project=' + encodeURIComponent(name) : base);
+  applyProjectMode();
+  applyFilter();
+}
+
+window.addEventListener('popstate', () => {
+  selectedProject = readURLProject();
+  applyProjectMode();
+  applyFilter();
+});
 
 // ── Session sort ───────────────────────────────────────────────────────────
 function setSessionSort(col) {
@@ -1477,6 +1506,8 @@ async function loadData() {
       );
       // Build model filter (reads URL for model selection too)
       buildFilterUI(d.all_models);
+      selectedProject = readURLProject();
+      applyProjectMode();
       updateSortIcons();
       updateModelSortIcons();
       updateProjectSortIcons();
