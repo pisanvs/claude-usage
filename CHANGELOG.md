@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.5 — TBD
+
+### Dashboard
+
+- Added per-project drill-down mode: clicking any project name in the Top Projects chart, Cost by Project table, Cost by Project & Branch table, or Sessions table scopes the entire dashboard to that project; a banner with "× All projects" exits the mode; the selected project persists in the URL hash (`#project=…`) so refresh and back-button work
+
 ## v1.2.4 — 2026-05-30
 
 ### Dashboard
