@@ -1202,6 +1202,12 @@ function renderProjectChart(byProject) {
     },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false, resizeDelay: 150,
+      onClick: (event, elements) => {
+        if (elements.length > 0) setSelectedProject(top[elements[0].index].project);
+      },
+      onHover: (event, elements) => {
+        event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+      },
       plugins: { legend: { onClick: legendToggle('project'), labels: { color: C.axis, boxWidth: 12 } } },
       scales: {
         x: { ticks: { color: C.axis, callback: v => fmt(v) }, grid: { color: C.border } },
@@ -1253,6 +1259,24 @@ function moreProjectRows() { projectLimit  = nextTableLimit(projectLimit,  lastB
 function lessProjectRows() { projectLimit  = TABLE_STEPS[0]; renderProjectCostTable(lastByProject);        scrollTableToTop('project-cost-body'); }
 function moreBranchRows()  { branchLimit   = nextTableLimit(branchLimit,   lastByProjectBranch.length); renderProjectBranchCostTable(lastByProjectBranch); }
 function lessBranchRows()  { branchLimit   = TABLE_STEPS[0]; renderProjectBranchCostTable(lastByProjectBranch); scrollTableToTop('project-branch-cost-body'); }
+function moreBranchOnlyRows() { branchOnlyLimit = nextTableLimit(branchOnlyLimit, lastByBranch.length); renderBranchCostTable(lastByBranch); }
+function lessBranchOnlyRows() { branchOnlyLimit = TABLE_STEPS[0]; renderBranchCostTable(lastByBranch); scrollTableToTop('branch-cost-body'); }
+
+function renderBranchCostTable(rows) {
+  const sorted = sortBranch(rows);
+  const shown = sorted.slice(0, branchOnlyLimit);
+  document.getElementById('branch-cost-body').innerHTML = shown.map(b => {
+    return `<tr>
+      <td class="muted" style="font-family:monospace">${esc(b.branch || '—')}</td>
+      <td class="num">${b.sessions}</td>
+      <td class="num">${fmt(b.turns)}</td>
+      <td class="num">${fmt(b.input)}</td>
+      <td class="num">${fmt(b.output)}</td>
+      <td class="cost">${fmtCost(b.cost)}</td>
+    </tr>`;
+  }).join('');
+  renderTableToggle('branch-cost-foot', sorted.length, branchOnlyLimit, 'lessBranchOnlyRows', 'moreBranchOnlyRows', 'exportBranchCSV');
+}
 
 function renderSessionsTable(sessions) {
   const shown = sessions.slice(0, sessionsLimit);
@@ -1263,7 +1287,7 @@ function renderSessionsTable(sessions) {
       : `<td class="cost-na">n/a</td>`;
     return `<tr>
       <td class="muted" style="font-family:monospace">${esc(s.session_id)}&hellip;</td>
-      <td>${esc(s.project)}</td>
+      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(s.project)});return false;">${esc(s.project)}</a></td>
       <td class="muted">${esc(s.last)}</td>
       <td class="muted">${esc(s.duration_min)}m</td>
       <td><span class="model-tag">${esc(s.model)}</span></td>
@@ -1363,7 +1387,7 @@ function renderProjectCostTable(byProject) {
   const shown = sorted.slice(0, projectLimit);
   document.getElementById('project-cost-body').innerHTML = shown.map(p => {
     return `<tr>
-      <td>${esc(p.project)}</td>
+      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(p.project)});return false;">${esc(p.project)}</a></td>
       <td class="num">${p.sessions}</td>
       <td class="num">${fmt(p.turns)}</td>
       <td class="num">${fmt(p.input)}</td>
@@ -1406,12 +1430,40 @@ function sortProjectBranch(rows) {
   });
 }
 
+function sortBranch(rows) {
+  return [...rows].sort((a, b) => {
+    const av = a[branchSortCol] ?? 0;
+    const bv = b[branchSortCol] ?? 0;
+    if (av < bv) return branchSortDir === 'desc' ? 1 : -1;
+    if (av > bv) return branchSortDir === 'desc' ? -1 : 1;
+    return 0;
+  });
+}
+
+function setBranchSort(col) {
+  if (branchSortCol === col) {
+    branchSortDir = branchSortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    branchSortCol = col;
+    branchSortDir = 'desc';
+  }
+  updateProjectBranchSortIcons();
+  updateBranchSortIcons();
+  renderBranchCostTable(lastByBranch);
+}
+
+function updateBranchSortIcons() {
+  document.querySelectorAll('[id^="bsort-"]').forEach(el => el.textContent = '');
+  const icon = document.getElementById('bsort-' + branchSortCol);
+  if (icon) icon.textContent = branchSortDir === 'desc' ? ' ▼' : ' ▲';
+}
+
 function renderProjectBranchCostTable(rows) {
   const sorted = sortProjectBranch(rows);
   const shown = sorted.slice(0, branchLimit);
   document.getElementById('project-branch-cost-body').innerHTML = shown.map(pb => {
     return `<tr>
-      <td>${esc(pb.project)}</td>
+      <td><a class="proj-link" href="#" onclick="setSelectedProject(${JSON.stringify(pb.project)});return false;">${esc(pb.project)}</a></td>
       <td class="muted" style="font-family:monospace">${esc(pb.branch || '\u2014')}</td>
       <td class="num">${pb.sessions}</td>
       <td class="num">${fmt(pb.turns)}</td>
@@ -1485,6 +1537,14 @@ function exportProjectBranchCSV() {
   downloadCSV('projects_by_branch', header, rows);
 }
 
+function exportBranchCSV() {
+  const header = ['Branch', 'Sessions', 'Turns', 'Input', 'Output', 'Cache Read', 'Cache Creation', 'Est. Cost'];
+  const rows = sortBranch(lastByBranch).map(b => {
+    return [b.branch, b.sessions, b.turns, b.input, b.output, b.cache_read, b.cache_creation, b.cost.toFixed(4)];
+  });
+  downloadCSV('branches', header, rows);
+}
+
 // ── Rescan ────────────────────────────────────────────────────────────────
 async function triggerRescan() {
   const btn = document.getElementById('rescan-btn');
@@ -1535,6 +1595,7 @@ async function loadData() {
       updateModelSortIcons();
       updateProjectSortIcons();
       updateProjectBranchSortIcons();
+      updateBranchSortIcons();
     }
 
     applyFilter();
