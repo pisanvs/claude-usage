@@ -802,7 +802,7 @@ function applyFilter() {
   const { start, end } = getRangeBounds(selectedRange);
 
   // Filter daily rows by model + date range
-  const filteredDaily = rawData.daily_by_model.filter(r =>
+  const filteredDaily = rawData.daily_by_model_project.filter(r =>
     selectedModels.has(r.model) && (!start || r.day >= start) && (!end || r.day <= end)
   );
 
@@ -885,7 +885,7 @@ function applyFilter() {
   };
 
   // Hourly aggregation (filtered by model + range, then bucketed by UTC hour)
-  const hourlySrc = (rawData.hourly_by_model || []).filter(r =>
+  const hourlySrc = (rawData.hourly_by_model_project || []).filter(r =>
     selectedModels.has(r.model) && (!start || r.day >= start) && (!end || r.day <= end)
   );
   const hourlyAgg = aggregateHourly(hourlySrc, hourlyTZ);
