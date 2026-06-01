@@ -60,7 +60,8 @@ class TestGetDashboardData(unittest.TestCase):
     def test_returns_valid_structure(self):
         data = get_dashboard_data(db_path=self.db_path)
         self.assertIn("all_models", data)
-        self.assertIn("daily_by_model", data)
+        self.assertIn("daily_by_model_project", data)
+        self.assertIn("hourly_by_model_project", data)
         self.assertIn("sessions_all", data)
         self.assertIn("generated_at", data)
 
@@ -76,13 +77,36 @@ class TestGetDashboardData(unittest.TestCase):
         self.assertEqual(session["model"], "claude-sonnet-4-6")
         self.assertEqual(session["input"], 5000)
 
-    def test_daily_by_model_populated(self):
+    def test_daily_by_model_project_populated(self):
         data = get_dashboard_data(db_path=self.db_path)
-        self.assertGreater(len(data["daily_by_model"]), 0)
-        day = data["daily_by_model"][0]
+        self.assertGreater(len(data["daily_by_model_project"]), 0)
+        day = data["daily_by_model_project"][0]
         self.assertIn("day", day)
         self.assertIn("model", day)
         self.assertIn("input", day)
+
+    def test_daily_by_model_project_key_present(self):
+        data = get_dashboard_data(db_path=self.db_path)
+        self.assertIn("daily_by_model_project", data)
+        self.assertNotIn("daily_by_model", data)
+
+    def test_daily_by_model_project_carries_project_field(self):
+        data = get_dashboard_data(db_path=self.db_path)
+        self.assertGreater(len(data["daily_by_model_project"]), 0)
+        row = data["daily_by_model_project"][0]
+        self.assertIn("project", row)
+        self.assertEqual(row["project"], "user/myproject")
+
+    def test_hourly_by_model_project_key_present(self):
+        data = get_dashboard_data(db_path=self.db_path)
+        self.assertIn("hourly_by_model_project", data)
+        self.assertNotIn("hourly_by_model", data)
+
+    def test_hourly_by_model_project_carries_project_field(self):
+        data = get_dashboard_data(db_path=self.db_path)
+        rows = data["hourly_by_model_project"]
+        self.assertTrue(all("project" in r for r in rows))
+        self.assertTrue(all(r["project"] == "user/myproject" for r in rows))
 
     def test_missing_db_returns_error(self):
         data = get_dashboard_data(db_path=Path("/nonexistent/path/usage.db"))
@@ -101,12 +125,12 @@ class TestGetDashboardData(unittest.TestCase):
 
     def test_hourly_by_model_present(self):
         data = get_dashboard_data(db_path=self.db_path)
-        self.assertIn("hourly_by_model", data)
-        self.assertIsInstance(data["hourly_by_model"], list)
+        self.assertIn("hourly_by_model_project", data)
+        self.assertIsInstance(data["hourly_by_model_project"], list)
 
     def test_hourly_by_model_buckets_by_utc_hour(self):
         data = get_dashboard_data(db_path=self.db_path)
-        rows = data["hourly_by_model"]
+        rows = data["hourly_by_model_project"]
         # Two turns at UTC 09:30 and 14:15 → two hour buckets
         by_hour = {r["hour"]: r for r in rows}
         self.assertIn(9, by_hour)
@@ -118,7 +142,7 @@ class TestGetDashboardData(unittest.TestCase):
 
     def test_hourly_by_model_carries_day_and_model(self):
         data = get_dashboard_data(db_path=self.db_path)
-        rows = data["hourly_by_model"]
+        rows = data["hourly_by_model_project"]
         self.assertTrue(all("day" in r and "model" in r for r in rows))
         self.assertTrue(all(r["model"] == "claude-sonnet-4-6" for r in rows))
         self.assertTrue(all(r["day"] == "2026-04-08" for r in rows))
@@ -163,13 +187,13 @@ class TestEmptyStringModelNormalization(unittest.TestCase):
 
     def test_daily_by_model_contains_unknown_not_empty(self):
         data = get_dashboard_data(db_path=self.db_path)
-        models = {r["model"] for r in data["daily_by_model"]}
+        models = {r["model"] for r in data["daily_by_model_project"]}
         self.assertIn("unknown", models)
         self.assertNotIn("", models)
 
     def test_hourly_by_model_contains_unknown_not_empty(self):
         data = get_dashboard_data(db_path=self.db_path)
-        models = {r["model"] for r in data["hourly_by_model"]}
+        models = {r["model"] for r in data["hourly_by_model_project"]}
         self.assertIn("unknown", models)
         self.assertNotIn("", models)
 
@@ -223,7 +247,7 @@ class TestMixedNullAndEmptyModel(unittest.TestCase):
 
     def test_daily_collapses_to_single_unknown(self):
         data = get_dashboard_data(db_path=self.db_path)
-        unknown_rows = [r for r in data["daily_by_model"] if r["model"] == "unknown"]
+        unknown_rows = [r for r in data["daily_by_model_project"] if r["model"] == "unknown"]
         # One day, one model bucket
         self.assertEqual(len(unknown_rows), 1, f"got {unknown_rows}")
         self.assertEqual(unknown_rows[0]["turns"], 2)
@@ -232,7 +256,7 @@ class TestMixedNullAndEmptyModel(unittest.TestCase):
     def test_hourly_collapses_to_single_unknown(self):
         data = get_dashboard_data(db_path=self.db_path)
         # Both turns are in UTC hour 9 — must be one row, not two
-        hour9 = [r for r in data["hourly_by_model"]
+        hour9 = [r for r in data["hourly_by_model_project"]
                  if r["hour"] == 9 and r["model"] == "unknown"]
         self.assertEqual(len(hour9), 1, f"got {hour9}")
         self.assertEqual(hour9[0]["turns"], 2)

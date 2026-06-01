@@ -31,24 +31,29 @@ def get_dashboard_data(db_path=DB_PATH):
     """).fetchall()
     all_models = [r["model"] for r in model_rows]
 
-    # ── Daily per-model, ALL history (client filters by range) ────────────────
+    # ── Daily per-model-per-project, ALL history ──────────────────────────────
     daily_rows = conn.execute("""
         SELECT
-            substr(timestamp, 1, 10)   as day,
-            COALESCE(NULLIF(model, ''), 'unknown') as model,
-            SUM(input_tokens)          as input,
-            SUM(output_tokens)         as output,
-            SUM(cache_read_tokens)     as cache_read,
-            SUM(cache_creation_tokens) as cache_creation,
-            COUNT(*)                   as turns
-        FROM turns
-        GROUP BY day, COALESCE(NULLIF(model, ''), 'unknown')
-        ORDER BY day, model
+            substr(t.timestamp, 1, 10)                       as day,
+            COALESCE(NULLIF(t.model, ''), 'unknown')         as model,
+            COALESCE(s.project_name, 'unknown')              as project,
+            SUM(t.input_tokens)                              as input,
+            SUM(t.output_tokens)                             as output,
+            SUM(t.cache_read_tokens)                         as cache_read,
+            SUM(t.cache_creation_tokens)                     as cache_creation,
+            COUNT(*)                                         as turns
+        FROM turns t
+        LEFT JOIN sessions s ON t.session_id = s.session_id
+        GROUP BY day,
+                 COALESCE(NULLIF(t.model, ''), 'unknown'),
+                 COALESCE(s.project_name, 'unknown')
+        ORDER BY day, model, project
     """).fetchall()
 
-    daily_by_model = [{
+    daily_by_model_project = [{
         "day":            r["day"],
         "model":          r["model"],
+        "project":        r["project"],
         "input":          r["input"] or 0,
         "output":         r["output"] or 0,
         "cache_read":     r["cache_read"] or 0,
@@ -56,27 +61,32 @@ def get_dashboard_data(db_path=DB_PATH):
         "turns":          r["turns"] or 0,
     } for r in daily_rows]
 
-    # ── Hourly per-day per-model (client filters by range + TZ-shifts) ────────
+    # ── Hourly per-day-per-model-per-project (client filters by range + TZ) ───
     # Timestamps are ISO8601 UTC (e.g. "2026-04-08T09:30:00Z"); chars 12-13 = hour.
     hourly_rows = conn.execute("""
         SELECT
-            substr(timestamp, 1, 10)                  as day,
-            CAST(substr(timestamp, 12, 2) AS INTEGER) as hour,
-            COALESCE(NULLIF(model, ''), 'unknown')    as model,
-            SUM(output_tokens)                        as output,
-            COUNT(*)                                  as turns
-        FROM turns
-        WHERE timestamp IS NOT NULL AND length(timestamp) >= 13
-        GROUP BY day, hour, COALESCE(NULLIF(model, ''), 'unknown')
-        ORDER BY day, hour, model
+            substr(t.timestamp, 1, 10)                       as day,
+            CAST(substr(t.timestamp, 12, 2) AS INTEGER)      as hour,
+            COALESCE(NULLIF(t.model, ''), 'unknown')         as model,
+            COALESCE(s.project_name, 'unknown')              as project,
+            SUM(t.output_tokens)                             as output,
+            COUNT(*)                                         as turns
+        FROM turns t
+        LEFT JOIN sessions s ON t.session_id = s.session_id
+        WHERE t.timestamp IS NOT NULL AND length(t.timestamp) >= 13
+        GROUP BY day, hour,
+                 COALESCE(NULLIF(t.model, ''), 'unknown'),
+                 COALESCE(s.project_name, 'unknown')
+        ORDER BY day, hour, model, project
     """).fetchall()
 
-    hourly_by_model = [{
-        "day":    r["day"],
-        "hour":   r["hour"] if r["hour"] is not None else 0,
-        "model":  r["model"],
-        "output": r["output"] or 0,
-        "turns":  r["turns"] or 0,
+    hourly_by_model_project = [{
+        "day":     r["day"],
+        "hour":    r["hour"] if r["hour"] is not None else 0,
+        "model":   r["model"],
+        "project": r["project"],
+        "output":  r["output"] or 0,
+        "turns":   r["turns"] or 0,
     } for r in hourly_rows]
 
     # ── All sessions (client filters by range and model) ──────────────────────
@@ -116,11 +126,11 @@ def get_dashboard_data(db_path=DB_PATH):
     conn.close()
 
     return {
-        "all_models":      all_models,
-        "daily_by_model":  daily_by_model,
-        "hourly_by_model": hourly_by_model,
-        "sessions_all":    sessions_all,
-        "generated_at":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "all_models":              all_models,
+        "daily_by_model_project":  daily_by_model_project,
+        "hourly_by_model_project": hourly_by_model_project,
+        "sessions_all":            sessions_all,
+        "generated_at":            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
